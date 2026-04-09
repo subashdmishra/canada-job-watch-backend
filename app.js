@@ -1,36 +1,31 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
-app.use(cors());
+
+// ✅ FIX CORS for ALL origins (Chrome extension)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+}));
+
 app.use(express.json());
 
-app.post('/jobs', async (req, res) => {
-  const { title, location } = req.body;
-  
-  // 🔹 REAL JOBS via public API (no blocks)
-  const realJobs = [
-    {
-      title: `${title} - ${location}`,
-      company: "TechCorp Canada",
-      location,
-      salary: "$80k - $120k",
-      description: `Full-time ${title} role. Remote/hybrid options.`,
-      url: `https://ca.indeed.com/jobs?q=${title}&l=${location}`
-    },
-    {
-      title: `Senior ${title}`,
-      company: "Google Canada",
-      location,
-      salary: "$120k - $180k",
-      description: "Build scalable systems with cutting-edge tech.",
-      url: `https://ca.indeed.com/jobs?q=${title}&l=${location}`
-    }
+// ✅ Catch BOTH endpoints extension might call
+app.options('*', cors()); // Preflight
+
+app.post('/jobs', (req, res) => res.json(testJobs()));
+app.post('/jobs/search', (req, res) => res.json(testJobs())); 
+app.get('/jobs', (req, res) => res.json(testJobs()));
+app.get('/jobs/search', (req, res) => res.json(testJobs()));
+
+function testJobs() {
+  return [
+    {title: "✅ FIXED! Backend Perfect", company: "Render Live", location: "Toronto", salary: "$90k", description: "CORS solved!", url: "https://indeed.ca"},
+    {title: "✅ Test Job 2", company: "Connection Works", location: "Toronto", salary: "$100k", description: "Real endpoint!", url: "https://indeed.ca"}
   ];
-  
-  console.log(`✅ Returning ${realJobs.length} jobs for ${title}`);
-  res.json(realJobs);
-});
+}
 
 app.listen(process.env.PORT || 10000, () => {
-  console.log('🚀 Backend live!');
+  console.log('🚀 Backend LIVE - all endpoints');
 });
