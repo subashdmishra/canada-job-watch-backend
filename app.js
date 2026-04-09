@@ -1,41 +1,103 @@
 const express = require('express');
+const cors = require('cors');
+const cheerio = require('cheerio');
+const axios = require('axios');
+
 const app = express();
+app.use(cors());
 app.use(express.json());
 
-// CORS headers
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+// 🔍 Real job scrapers
+async function scrapeIndeed(query, location) {
+  try {
+    const url = `https://ca.indeed.com/jobs?q=${encodeURIComponent(query)}&l=${encodeURIComponent(location)}`;
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    
+    const jobs = [];
+    $('.job_seen_beacon').slice(0, 5).each((i, el) => {
+      const title = $(el).find('h2 a span').text().trim();
+      const company = $(el).find('.companyName').text().trim();
+      const locationEl = $(el).find('.companyLocation').text().trim();
+      
+      if (title && company) {
+        jobs.push({
+          title,
+          company,
+          location: locationEl || location,
+          salary: 'N/A',
+          description: $(el).find('.summary').text().trim().slice(0, 200) + '...',
+          url: `https://ca.indeed.com${$(el).find('h2 a').attr('href')}`
+        });
+      }
+    });
+    return jobs;
+  } catch (e) {
+    console.log('Indeed error:', e.message);
+    return [];
   }
-});
+}
 
-app.post('/jobs/search', (req, res) => {
-  console.log('Received request:', req.body);
-  const { title = 'Developer', location = 'Toronto', radius = 25, sources = {} } = req.body;
+async function scrapeWorkopolis(query, location) {
+  try {
+    const url = `https://www.workopolis.com/search?q=${encodeURIComponent(query)}&l=${encodeURIComponent(location)}`;
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    
+    const jobs = [];
+    $('.job-tile').slice(0, 3).each((i, el) => {
+      const title = $(el).find('.job-tile-title a').text().trim();
+      const company = $(el).find('.job-tile-company').text().trim();
+      
+      if (title && company) {
+        jobs.push({
+          title,
+          company,
+          location,
+          salary: 'N/A',
+          description: 'Full-time position at Workopolis listing.',
+          url: $(el).find('.job-tile-title a').attr('href')
+        });
+      }
+    });
+    return jobs;
+  } catch (e) {
+    return [];
+  }
+}
+
+// Your endpoint
+app.post('/jobs', async (req, res) => {
+  const { title, location, radius, boards } = req.body;
   
-  const sampleJobs = [
-    {title: `Sample ${title} Job - Indeed`, company: 'Tech Corp', location, url: `https://ca.indeed.com/${title.toLowerCase().replace(/ /g, '-')}`, source: 'Indeed', postedAt: Date.now()},
-    {title: `Sample ${title} Job - LinkedIn`, company: 'Startup Inc', location, url: `https://www.linkedin.com/jobs/view/${title.toLowerCase().replace(/ /g, '-')}`, source: 'LinkedIn', postedAt: Date.now()},
-    {title: `Sample ${title} Job - Job Bank`, company: 'Government of Canada', location, url: `https://www.jobbank.gc.ca/jobsearch/jobposting/${Date.now()}`, source: 'Job Bank', postedAt: Date.now()},
-    {title: `Sample ${title} Job - Workopolis`, company: 'Workopolis Employer', location, url: `https://www.workopolis.com/jobsearch/job-detail/${Date.now()}`, source: 'Workopolis', postedAt: Date.now()},
-    {title: `Sample ${title} Job - Glassdoor`, company: 'Glassdoor Ltd', location, url: `https://www.glassdoor.ca/Job/${title.toLowerCase().replace(/ /g, '-')}-jobs-SRCH_KO0`, source: 'Glassdoor', postedAt: Date.now()}
-  ];
-
-  console.log(`Sending ${sampleJobs.length} sample jobs`);
-  res.json({ok: true, jobs: sampleJobs});
+  console.log(`Scraping: ${title} in ${location}`);
+  
+  const allJobs = [];
+  
+  // Indeed (always works)
+  if (boards.includes('indeed') || boards.length === 0) {
+    const indeedJobs = await scrapeIndeed(title, location);
+    allJobs.push(...indeedJobs);
+  }
+  
+  // Workopolis
+  if (boards.includes('workopolis')) {
+    const wpJobs = await scrapeWorkopolis(title, location);
+    allJobs.push(...wpJobs);
+  }
+  
+  // Return unique jobs (dedupe by title+company)
+  const uniqueJobs = allJobs.filter((job, index, self) => 
+    index === self.findIndex(j => 
+      j.title.toLowerCase().includes(job.title.toLowerCase()) && 
+      j.company.toLowerCase().includes(job.company.toLowerCase())
+    )
+  );
+  
+  console.log(`Found ${uniqueJobs.length} real jobs`);
+  res.json(uniqueJobs.slice(0, 10));
 });
 
-app.get('/jobs', (req, res) => {
-  res.json({ok: true, jobs: []});
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT}`);
-  console.log('Test: http://localhost:' + PORT + '/jobs');
+app.listen(process.env.PORT || 10000, () => {
+  console.log('🚀 Backend live at port', process.env.PORT || 10000);
 });
