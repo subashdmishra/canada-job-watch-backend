@@ -1,61 +1,112 @@
 const express = require('express');
 const cors = require('cors');
+const cheerio = require('cheerio');
+const axios = require('axios');
 const app = express();
 
-// ✅ PERFECT CORS - allows Chrome extensions
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
-}));
-
+app.use(cors({ origin: '*' }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// ✅ GET endpoint for extension (title/location as query params)
-app.get('/jobs', (req, res) => {
-  const { title = 'software', location = 'Toronto' } = req.query;
-  
-  const jobs = [
-    {
-      title: `✅ ${title} Job - ${location}`,
-      company: 'TechCorp Canada',
-      location: location,
-      salary: '$90k - $120k',
-      description: 'Full-time position. Backend ↔ Extension perfect!',
-      url: `https://ca.indeed.com/jobs?q=${title}&l=${location}`
-    },
-    {
-      title: `✅ Senior ${title}`,
-      company: 'Render Works',
-      location: location,
-      salary: '$110k - $150k',
-      description: 'Production ready. Click to apply on Indeed.',
-      url: `https://ca.indeed.com/jobs?q=${title}&l=${location}`
-    },
-    {
-      title: `${title} (Remote OK)`,
-      company: 'Startup Inc',
-      location: `${location} (Remote)`,
-      salary: '$85k+',
-      description: 'Fast-growing company hiring immediately.',
-      url: `https://ca.indeed.com/jobs?q=${title}&l=${location}`
-    }
-  ];
-  
-  console.log(`✅ GET /jobs?title=${title}&location=${location}`);
-  res.json(jobs);
-});
+async function scrapeIndeed(title, location, radius) {
+  try {
+    const radiusKm = radius * 1.6; // miles to km
+    const url = `https://ca.indeed.com/jobs?q=${encodeURIComponent(title)}&l=${encodeURIComponent(location)}&radius=${radiusKm}&fromage=7`;
+    const { data } = await axios.get(url, { 
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    const $ = cheerio.load(data);
+    
+    const jobs = [];
+    $('.job_seen_beacon').slice(0, 8).each((i, el) => {
+      const jobTitle = $(el).find('.jcs-JobTitle').text().trim() || $(el).find('h2 a span').text().trim();
+      const company = $(el).find('.companyName').text().trim();
+      const loc = $(el).find('.companyLocation').text().trim();
+      const salary = $(el).find('.salary-snippet').text().trim() || 'Salary not listed';
+      const desc = $(el).find('.summary').text().trim().slice(0, 150);
+      const link = `https://ca.indeed.com${$(el).find('h2 a').attr('href') || ''}`;
+      
+      if (jobTitle && company) {
+        jobs.push({ title: jobTitle, company, location: loc, salary, description: desc, url: link, source: 'Indeed' });
+      }
+    });
+    return jobs;
+  } catch (e) {
+    console.log('Indeed failed:', e.message);
+    return [];
+  }
+}
 
-// ✅ POST backup (if needed later)
-app.post('/jobs', (req, res) => {
-  const { title = 'software', location = 'Toronto' } = req.body;
-  res.json([
-    {title: `✅ POST ${title}`, company: 'Backend', location, salary: '$100k', description: 'POST works too!', url: 'https://indeed.ca'}
+async function scrapeLinkedIn(title, location, radius) {
+  try {
+    const url = `https://ca.linkedin.com/jobs/search/?keywords=${encodeURIComponent(title)}&location=${encodeURIComponent(location)}&distance=${radius}`;
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    
+    const jobs = [];
+    $('.jobs-search__results-list li').slice(0, 5).each((i, el) => {
+      const jobTitle = $(el).find('.job-link').text().trim();
+      const company = $(el).find('.sub-title').text().trim();
+      if (jobTitle && company) {
+        jobs.push({ 
+          title: jobTitle, 
+          company, 
+          location, 
+          salary: 'Competitive', 
+          description: 'LinkedIn premium listing', 
+          url: `https://linkedin.com/jobs/${$(el).attr('data-occludable-job-id')}`,
+          source: 'LinkedIn'
+        });
+      }
+    });
+    return jobs;
+  } catch (e) {
+    return [];
+  }
+}
+
+async function scrapeGoogleJobs(title, location, radius) {
+  try {
+    const url = `https://www.google.com/search?q=${encodeURIComponent(title)}+jobs+near+${encodeURIComponent(location)}`;
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    
+    const jobs = [];
+    '.job_seen_beacon, [data-occludable-job-id]').slice(0, 3).each((i, el) => {
+      const title = $(el).find('h3').text().trim();
+      const company = $(el).find('.company').text().trim();
+      if (title && company) {
+        jobs.push({ title, company, location, salary: 'TBD', description: 'Google Jobs', url: $(el).find('a').attr('href'), source: 'Google' });
+      }
+    });
+    return jobs;
+  } catch (e) {
+    return [];
+  }
+}
+
+app.get('/jobs', async (req, res) => {
+  const { title = 'software', location = 'Toronto', radius = 25 } = req.query;
+  
+  console.log(`🔍 Scraping: ${title} in ${location} (${radius}mi)`);
+  
+  const allJobs = [];
+  
+  // Run scrapers in parallel
+  const [indeedJobs, linkedinJobs] = await Promise.all([
+    scrapeIndeed(title, location, radius),
+    scrapeLinkedIn(title, location, radius)
   ]);
+  
+  allJobs.push(...indeedJobs, ...linkedinJobs);
+  
+  // Deduplicate by title+company
+  const uniqueJobs = allJobs.filter((job, i, arr) => 
+    arr.findIndex(t => t.title === job.title && t.company === job.company) === i
+  );
+  
+  console.log(`✅ Found ${uniqueJobs.length} real jobs`);
+  res.json(uniqueJobs.slice(0, 15));
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Backend LIVE on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Real jobs scraper on ${PORT}`));
