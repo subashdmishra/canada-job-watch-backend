@@ -1,0 +1,14 @@
+{
+  "name": "canada-job-watch-backend",
+  "version": "1.0.0",
+  "description": "Backend for Canada Job Watch extension",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2"
+  }
+}
