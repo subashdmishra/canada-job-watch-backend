@@ -1,14 +1,21 @@
 {
-  "name": "canada-job-watcher",
+  "name": "canada-job-watch-backend",
   "version": "1.0.0",
+  "description": "Real Canada job scraper for Chrome extension",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "dev": "nodemon app.js"
   },
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0-rc.12"
-  }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Subash Mishra",
+  "license": "MIT"
 }
